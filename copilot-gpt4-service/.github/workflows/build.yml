@@ -1,0 +1,90 @@
+name: Build
+
+on:
+  push:
+    paths-ignore:
+      - 'README*'
+      - 'LICENSE'
+      - 'CODE_OF_CONDUCT.md'
+      - '.editorconfig'
+      - '.chart/**'
+      - '.github/**'
+      - '.gitignore'
+      - 'makefile'
+      - 'config.env.example'
+      - 'shells/**'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "build a binary with the specified git tag, enter a git tag."
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      tag:
+        description: "Build a binary with the specified git tag, enter a git tag."
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION_NAME: ${{ steps.set_version.outputs.VERSION_NAME }}
+    steps:
+      - name: Set version
+        id: set_version
+        run: |
+          {
+            if [ -n "${{ github.event.inputs.tag }}" ]; then
+              echo "VERSION_NAME=${{ github.event.inputs.tag }}"
+            elif [ -n "${{ inputs.tag }}" ]; then
+              echo "VERSION_NAME=${{ inputs.tag }}"
+            else
+              echo "VERSION_NAME="
+            fi
+          } >> $GITHUB_OUTPUT
+
+  build:
+    strategy:
+      matrix:
+        goos: [windows, linux, darwin]
+        goarch: [amd64, arm64]
+        include:
+          - goos: linux
+            goarch: arm
+      fail-fast: false
+
+    runs-on: ubuntu-latest
+    needs: [setup]
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: 0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.VERSION_NAME }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Build
+        run: |
+          go build -o build/copilot-gpt4-service${{ matrix.goos == 'windows' && '.exe' || ''}}
+          ls -la build
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-gpt4-service-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: build/*
